@@ -2,7 +2,7 @@
 `timescale 1ns / 1ps
 
 module vending_fsm #(
-    parameter integer DISPENSE_SECONDS = 1
+    parameter integer DISPENSE_CYCLES = 100_000_000
 )(
     input  wire       clk,
     input  wire       reset,
