@@ -5,8 +5,10 @@ module vending_machine_top (
     input  wire       CLK100MHZ,
     input  wire       CPU_RESETN,
     input  wire [0:0] SW,
-    input  wire       BTNC,
-    input  wire       BTNU,
+
+    input  wire       BTNC,  // Start transaction
+    input  wire       BTNU,  // Insert Rs. 5
+    input  wire       BTNR,  // Insert Rs. 10
 
     output wire [7:0] LED,
     output wire [6:0] SEG,
@@ -15,6 +17,7 @@ module vending_machine_top (
 );
 
     wire reset;
+
     wire start_pulse;
     wire coin5_pulse;
     wire coin10_pulse;
@@ -25,11 +28,12 @@ module vending_machine_top (
 
     wire [7:0] amount;
     wire [7:0] change;
+    wire [7:0] display_value;
 
-    // Nexys 4 DDR CPU_RESETN is active-low
+    // The Nexys 4 DDR reset button is active-low.
     assign reset = ~CPU_RESETN;
 
-    // BTNC starts a transaction
+    // Center button: start a new transaction.
     button_pulse start_button (
         .clk(CLK100MHZ),
         .reset(reset),
@@ -37,7 +41,7 @@ module vending_machine_top (
         .pulse_out(start_pulse)
     );
 
-    // BTNU inserts Rs. 5
+    // Up button: insert Rs. 5.
     button_pulse coin5_button (
         .clk(CLK100MHZ),
         .reset(reset),
@@ -45,13 +49,15 @@ module vending_machine_top (
         .pulse_out(coin5_pulse)
     );
 
-    // NOTE:
-    // The current board interface has only two buttons assigned:
-    // BTNC = start, BTNU = Rs. 5.
-    // A separate Rs. 10 input must be assigned to another button
-    // or implemented using a switch in a later revision.
+    // Right button: insert Rs. 10.
+    button_pulse coin10_button (
+        .clk(CLK100MHZ),
+        .reset(reset),
+        .button_in(BTNR),
+        .pulse_out(coin10_pulse)
+    );
 
-    // Vending machine controller
+    // Main vending machine controller.
     vending_fsm #(
         .CLK_FREQ_HZ(100_000_000),
         .DISPENSE_SECONDS(1)
@@ -61,7 +67,7 @@ module vending_machine_top (
         .start(start_pulse),
         .select_b(SW[0]),
         .coin_5(coin5_pulse),
-        .coin_10(1'b0),
+        .coin_10(coin10_pulse),
         .dispense_a(dispense_a),
         .dispense_b(dispense_b),
         .amount(amount),
@@ -69,16 +75,21 @@ module vending_machine_top (
         .busy(busy)
     );
 
-    // LED indicators
+    // LEDs:
+    // LED[0] = Product A dispensing
+    // LED[1] = Product B dispensing
+    // LED[2] = Transaction busy
+    // LED[7:3] = Low five bits of inserted amount
     assign LED[0]   = dispense_a;
     assign LED[1]   = dispense_b;
     assign LED[2]   = busy;
     assign LED[7:3] = amount[4:0];
 
-    // Display change when available; otherwise show amount inserted
-    wire [7:0] display_value;
-    assign display_value = (change != 0) ? change : amount;
+    // Show change when nonzero; otherwise show the inserted amount.
+    assign display_value =
+        (change != 8'd0) ? change : amount;
 
+    // Seven-segment display driver.
     seven_segment display_driver (
         .clk(CLK100MHZ),
         .reset(reset),
