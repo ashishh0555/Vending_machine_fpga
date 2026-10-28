@@ -149,14 +149,17 @@ module vending_machine_tb;
         wait (busy == 1'b0);
         reset_fsm;
 
+        
         // TEST 2: Product A, Rs. 15 payment.
+        // Insert Rs. 5 first, then Rs. 10.
         $display("TEST 2: Product A with Rs. 5 change");
         start_transaction(1'b0);
-        insert_coin10;
         insert_coin5;
+        insert_coin10;
         check_result(1'b0, 8'd15, 8'd5);
         wait (busy == 1'b0);
         reset_fsm;
+
 
         // TEST 3: Product B, exact Rs. 20.
         $display("TEST 3: Product B exact payment");
