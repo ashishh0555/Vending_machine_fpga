@@ -30,10 +30,10 @@ module vending_machine_top (
     wire [7:0] change;
     wire [7:0] display_value;
 
-    // The Nexys 4 DDR reset button is active-low.
+    // Nexys 4 DDR reset is active-low.
     assign reset = ~CPU_RESETN;
 
-    // Center button: start a new transaction.
+    // Center button: start transaction.
     button_pulse start_button (
         .clk(CLK100MHZ),
         .reset(reset),
@@ -85,18 +85,19 @@ module vending_machine_top (
     assign LED[2]   = busy;
     assign LED[7:3] = amount[4:0];
 
-    // Show change when nonzero; otherwise show the inserted amount.
+    // Show change while dispensing.
+    // Otherwise show the amount inserted.
     assign display_value =
-        (change != 8'd0) ? change : amount;
+        (dispense_a || dispense_b) ? change : amount;
 
     // Seven-segment display driver.
     seven_segment display_driver (
         .clk(CLK100MHZ),
         .reset(reset),
         .value(display_value),
-        .SEG(SEG),
-        .AN(AN),
-        .DP(DP)
+        .seg(SEG),
+        .an(AN),
+        .dp(DP)
     );
 
 endmodule
