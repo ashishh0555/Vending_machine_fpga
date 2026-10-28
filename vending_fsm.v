@@ -19,39 +19,49 @@ module vending_fsm #(
     output reg        busy
 );
 
-    localparam [2:0]
-        IDLE       = 3'd0,
-        COLLECT    = 3'd1,
-        DISPENSE   = 3'd2,
-        SHOW_CHANGE = 3'd3;
+    // FSM states
+    localparam [1:0]
+        IDLE        = 2'b00,
+        COLLECT     = 2'b01,
+        DISPENSE    = 2'b10,
+        SHOW_CHANGE = 2'b11;
 
+    // Number of clock cycles for the dispense indication
     localparam integer DISPENSE_CYCLES =
-        CLK_FREQ_HZ * DISPENSE_SECONDS;
+        (CLK_FREQ_HZ > 0 && DISPENSE_SECONDS > 0)
+        ? CLK_FREQ_HZ * DISPENSE_SECONDS : 1;
 
     localparam integer COUNT_WIDTH =
-        (DISPENSE_CYCLES <= 1) ? 1 : $clog2(DISPENSE_CYCLES);
+        (DISPENSE_CYCLES <= 1)
+        ? 1 : $clog2(DISPENSE_CYCLES);
 
-    reg [2:0] state;
+    reg [1:0] state;
     reg [7:0] price;
     reg       selected_b;
-    reg [7:0] accepted_amount;
     reg [COUNT_WIDTH-1:0] counter;
+
+    // Combinational next payment amount
+    wire [8:0] next_amount;
+
+    assign next_amount =
+        {1'b0, amount}
+        + (coin_5 && !coin_10 ? 9'd5 :
+           coin_10 && !coin_5 ? 9'd10 : 9'd0);
 
     always @(posedge clk) begin
         if (reset) begin
-            state           <= IDLE;
-            amount          <= 8'd0;
-            change          <= 8'd0;
-            dispense_a      <= 1'b0;
-            dispense_b      <= 1'b0;
-            busy             <= 1'b0;
-            price           <= 8'd10;
-            selected_b      <= 1'b0;
-            accepted_amount <= 8'd0;
-            counter         <= 0;
-        end
-        else begin
-            // Default: dispensing indicators are inactive.
+            state      <= IDLE;
+            price      <= 8'd10;
+            selected_b <= 1'b0;
+            amount     <= 8'd0;
+            change     <= 8'd0;
+            dispense_a <= 1'b0;
+            dispense_b <= 1'b0;
+            busy       <= 1'b0;
+            counter    <= {COUNT_WIDTH{1'b0}};
+        end else begin
+
+            // Default outputs
             dispense_a <= 1'b0;
             dispense_b <= 1'b0;
 
@@ -61,63 +71,61 @@ module vending_fsm #(
                     busy <= 1'b0;
 
                     if (start) begin
-                        selected_b      <= select_b;
-                        price           <= select_b ? 8'd20 : 8'd10;
-                        amount          <= 8'd0;
-                        change          <= 8'd0;
-                        accepted_amount <= 8'd0;
-                        counter         <= 0;
-                        busy            <= 1'b1;
-                        state           <= COLLECT;
+                        selected_b <= select_b;
+                        price      <= select_b ? 8'd20 : 8'd10;
+                        amount     <= 8'd0;
+                        change     <= 8'd0;
+                        counter    <= {COUNT_WIDTH{1'b0}};
+                        busy       <= 1'b1;
+                        state      <= COLLECT;
                     end
                 end
 
                 COLLECT: begin
                     busy <= 1'b1;
 
-                    // Accept one denomination at a time.
-                    if (coin_5 && !coin_10) begin
-                        accepted_amount = amount + 8'd5;
-                        amount <= accepted_amount;
+                    // Accept only one coin denomination per clock.
+                    if ((coin_5 ^ coin_10) == 1'b1) begin
+                        if (next_amount > 9'd255) begin
+                            // Prevent 8-bit amount overflow.
+                            amount <= 8'd255;
+                        end else begin
+                            amount <= next_amount[7:0];
+                        end
 
-                        if (accepted_amount >= price)
+                        if (next_amount >= {1'b0, price}) begin
                             state <= DISPENSE;
-                    end
-                    else if (coin_10 && !coin_5) begin
-                        accepted_amount = amount + 8'd10;
-                        amount <= accepted_amount;
-
-                        if (accepted_amount >= price)
-                            state <= DISPENSE;
+                        end
                     end
                 end
 
                 DISPENSE: begin
+                    // Assert the selected product indicator.
                     dispense_a <= !selected_b;
                     dispense_b <= selected_b;
 
-                    if (amount > price)
+                    // Calculate change from the accepted payment.
+                    if (amount >= price)
                         change <= amount - price;
                     else
                         change <= 8'd0;
 
-                    counter <= 0;
-                    state <= SHOW_CHANGE;
+                    counter <= {COUNT_WIDTH{1'b0}};
+                    state   <= SHOW_CHANGE;
                 end
 
                 SHOW_CHANGE: begin
-                    busy <= 1'b1;
+                    busy       <= 1'b1;
                     dispense_a <= !selected_b;
                     dispense_b <= selected_b;
 
                     if (counter >= DISPENSE_CYCLES - 1) begin
                         dispense_a <= 1'b0;
                         dispense_b <= 1'b0;
-                        counter <= 0;
-                        busy <= 1'b0;
-                        state <= IDLE;
-                    end
-                    else begin
+                        busy       <= 1'b0;
+                        counter    <= {COUNT_WIDTH{1'b0}};
+                        state      <= IDLE;
+                    end else begin
                         counter <= counter + 1'b1;
                     end
                 end
@@ -128,8 +136,8 @@ module vending_fsm #(
                     change     <= 8'd0;
                     dispense_a <= 1'b0;
                     dispense_b <= 1'b0;
-                    busy        <= 1'b0;
-                    counter    <= 0;
+                    busy       <= 1'b0;
+                    counter    <= {COUNT_WIDTH{1'b0}};
                 end
 
             endcase
