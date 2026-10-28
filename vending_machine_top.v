@@ -15,64 +15,77 @@ module vending_machine_top (
 );
 
     wire reset;
+    wire start_pulse;
     wire coin5_pulse;
     wire coin10_pulse;
 
     wire dispense_a;
     wire dispense_b;
+    wire busy;
 
     wire [7:0] amount;
     wire [7:0] change;
-    wire [15:0] display_value;
 
+    // Nexys 4 DDR CPU_RESETN is active-low
     assign reset = ~CPU_RESETN;
 
-    // Debounced coin-button inputs
-    button_pulse coin5_button (
+    // BTNC starts a transaction
+    button_pulse start_button (
         .clk(CLK100MHZ),
         .reset(reset),
         .button_in(BTNC),
-        .pulse(coin5_pulse)
+        .pulse_out(start_pulse)
     );
 
-    button_pulse coin10_button (
+    // BTNU inserts Rs. 5
+    button_pulse coin5_button (
         .clk(CLK100MHZ),
         .reset(reset),
         .button_in(BTNU),
-        .pulse(coin10_pulse)
+        .pulse_out(coin5_pulse)
     );
 
-    // Vending machine FSM
-    vending_fsm vending_controller (
+    // NOTE:
+    // The current board interface has only two buttons assigned:
+    // BTNC = start, BTNU = Rs. 5.
+    // A separate Rs. 10 input must be assigned to another button
+    // or implemented using a switch in a later revision.
+
+    // Vending machine controller
+    vending_fsm #(
+        .CLK_FREQ_HZ(100_000_000),
+        .DISPENSE_SECONDS(1)
+    ) vending_controller (
         .clk(CLK100MHZ),
         .reset(reset),
+        .start(start_pulse),
         .select_b(SW[0]),
         .coin_5(coin5_pulse),
-        .coin_10(coin10_pulse),
+        .coin_10(1'b0),
         .dispense_a(dispense_a),
         .dispense_b(dispense_b),
         .amount(amount),
-        .change(change)
+        .change(change),
+        .busy(busy)
     );
 
-    // Show change when nonzero; otherwise show inserted amount.
-    assign display_value = (change != 0)
-                         ? {8'b0, change}
-                         : {8'b0, amount};
+    // LED indicators
+    assign LED[0]   = dispense_a;
+    assign LED[1]   = dispense_b;
+    assign LED[2]   = busy;
+    assign LED[7:3] = amount[4:0];
 
-    // Four-digit seven-segment display
+    // Display change when available; otherwise show amount inserted
+    wire [7:0] display_value;
+    assign display_value = (change != 0) ? change : amount;
+
     seven_segment display_driver (
         .clk(CLK100MHZ),
         .reset(reset),
         .value(display_value),
         .SEG(SEG),
-        .DP(DP),
-        .AN(AN)
+        .AN(AN),
+        .DP(DP)
     );
-
-    // LEDs
-    assign LED[0] = dispense_a;
-    assign LED[1] = dispense_b;
-    assign LED[7:2] = amount[5:0];
 
 endmodule
