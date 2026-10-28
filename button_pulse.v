@@ -8,45 +8,51 @@ module button_pulse #(
     input  wire clk,
     input  wire reset,
     input  wire button_in,
-    output reg  pulse
+    output reg  pulse_out
 );
 
-    localparam integer COUNT_MAX =
+    localparam integer DEBOUNCE_CYCLES =
         (CLK_FREQ_HZ / 1000) * DEBOUNCE_MS;
 
     localparam integer COUNT_WIDTH =
-        (COUNT_MAX <= 1) ? 1 : $clog2(COUNT_MAX);
+        (DEBOUNCE_CYCLES <= 1) ? 1 : $clog2(DEBOUNCE_CYCLES + 1);
 
+    // Two-stage synchronizer
     reg sync_ff1;
     reg sync_ff2;
-    reg stable_button;
-    reg [COUNT_WIDTH-1:0] counter;
+
+    // Debounce state
+    reg debounced_state;
+    reg [COUNT_WIDTH-1:0] debounce_count;
 
     always @(posedge clk) begin
         if (reset) begin
-            sync_ff1     <= 1'b0;
-            sync_ff2     <= 1'b0;
-            stable_button <= 1'b0;
-            counter      <= 0;
-            pulse        <= 1'b0;
-        end
-        else begin
+            sync_ff1       <= 1'b0;
+            sync_ff2       <= 1'b0;
+            debounced_state <= 1'b0;
+            debounce_count <= {COUNT_WIDTH{1'b0}};
+            pulse_out      <= 1'b0;
+        end else begin
+            // Synchronize the asynchronous physical button
             sync_ff1 <= button_in;
             sync_ff2 <= sync_ff1;
-            pulse <= 1'b0;
 
-            if (sync_ff2 == stable_button) begin
-                counter <= 0;
-            end
-            else if (counter == COUNT_MAX - 1) begin
-                stable_button <= sync_ff2;
-                counter <= 0;
+            // Pulse is low by default; asserted for one clock only
+            pulse_out <= 1'b0;
 
-                if (sync_ff2)
-                    pulse <= 1'b1;
-            end
-            else begin
-                counter <= counter + 1'b1;
+            if (sync_ff2 == debounced_state) begin
+                debounce_count <= {COUNT_WIDTH{1'b0}};
+            end else begin
+                if (debounce_count >= DEBOUNCE_CYCLES - 1) begin
+                    debounced_state <= sync_ff2;
+                    debounce_count <= {COUNT_WIDTH{1'b0}};
+
+                    // Generate pulse only on a confirmed press
+                    if (sync_ff2 == 1'b1)
+                        pulse_out <= 1'b1;
+                end else begin
+                    debounce_count <= debounce_count + 1'b1;
+                end
             end
         end
     end
