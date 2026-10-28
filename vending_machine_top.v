@@ -20,12 +20,14 @@ module vending_machine_top (
 
     wire dispense_a;
     wire dispense_b;
+
     wire [7:0] amount;
     wire [7:0] change;
+    wire [15:0] display_value;
 
     assign reset = ~CPU_RESETN;
 
-    // Debounce and generate one pulse for each coin-button press.
+    // Debounced coin-button inputs
     button_pulse coin5_button (
         .clk(CLK100MHZ),
         .reset(reset),
@@ -40,7 +42,7 @@ module vending_machine_top (
         .pulse(coin10_pulse)
     );
 
-    // Main vending machine controller.
+    // Vending machine FSM
     vending_fsm vending_controller (
         .clk(CLK100MHZ),
         .reset(reset),
@@ -53,17 +55,22 @@ module vending_machine_top (
         .change(change)
     );
 
-    // Display the accumulated amount.
+    // Show change when nonzero; otherwise show inserted amount.
+    assign display_value = (change != 0)
+                         ? {8'b0, change}
+                         : {8'b0, amount};
+
+    // Four-digit seven-segment display
     seven_segment display_driver (
         .clk(CLK100MHZ),
         .reset(reset),
-        .value({8'b0, amount}),
+        .value(display_value),
         .SEG(SEG),
         .DP(DP),
         .AN(AN)
     );
 
-    // LED indicators.
+    // LEDs
     assign LED[0] = dispense_a;
     assign LED[1] = dispense_b;
     assign LED[7:2] = amount[5:0];
