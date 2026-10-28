@@ -4,25 +4,25 @@
 module vending_machine_top (
     input  wire        CLK100MHZ,
     input  wire        CPU_RESETN,
-
     input  wire [0:0]  SW,
     input  wire        BTNC,
     input  wire        BTNU,
 
-    output wire [7:0]  LED
+    output wire [7:0]  LED,
+    output wire [6:0]  SEG,
+    output wire        DP,
+    output wire [7:0]  AN
 );
 
     wire reset;
     wire dispense_a;
     wire dispense_b;
-
     wire [7:0] amount;
     wire [7:0] change;
 
-    // Nexys 4 DDR reset button is active-low.
     assign reset = ~CPU_RESETN;
 
-    // Main vending machine controller.
+    // Vending machine controller
     vending_fsm vending_controller (
         .clk(CLK100MHZ),
         .reset(reset),
@@ -35,9 +35,21 @@ module vending_machine_top (
         .change(change)
     );
 
-    // Hardware status indicators.
+    // Display the amount inserted.
+    seven_segment display_driver (
+        .clk(CLK100MHZ),
+        .reset(reset),
+        .value({8'b0, amount}),
+        .SEG(SEG),
+        .DP(DP),
+        .AN(AN)
+    );
+
+    // LEDs show dispensing status.
     assign LED[0] = dispense_a;
     assign LED[1] = dispense_b;
+
+    // LEDs show the lower six bits of the inserted amount.
     assign LED[7:2] = amount[5:0];
 
 endmodule
