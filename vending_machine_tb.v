@@ -186,6 +186,7 @@ module vending_machine_tb;
         insert_coin5;
         repeat (5) @(negedge clk);
 
+        
         if (!dispense_a && !dispense_b && amount == 8'd5) begin
             $display("PASS: No dispensing with insufficient payment");
         end
@@ -193,6 +194,19 @@ module vending_machine_tb;
             $display("FAIL: Unexpected output for insufficient payment");
             $finish;
         end
+
+        // Reset must clear the unfinished transaction.
+        reset_fsm;
+
+        if (amount == 8'd0 && change == 8'd0 &&
+            !dispense_a && !dispense_b && !busy) begin
+            $display("PASS: Reset clears transaction");
+        end
+        else begin
+            $display("FAIL: Reset did not clear transaction");
+            $finish;
+        end
+
 
         $display("--------------------------------");
         $display("ALL TESTS COMPLETED");
