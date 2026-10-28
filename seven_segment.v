@@ -1,75 +1,83 @@
 
 `timescale 1ns / 1ps
 
-module seven_segment (
+module seven_segment #(
+    parameter integer CLK_FREQ_HZ = 100_000_000,
+    parameter integer REFRESH_HZ  = 1000
+)(
     input  wire       clk,
     input  wire       reset,
     input  wire [7:0] value,
-    output reg  [6:0] SEG,
-    output reg  [7:0] AN,
-    output wire       DP
+    output reg  [6:0] seg,
+    output wire       dp,
+    output reg  [7:0] an
 );
 
-    // Nexys 4 DDR seven-segment display uses active-low outputs
-    assign DP = 1'b1;  // Decimal point off
+    localparam integer RAW_DIV =
+        (REFRESH_HZ > 0) ?
+        (CLK_FREQ_HZ / (2 * REFRESH_HZ)) : 1;
 
-    reg [16:0] refresh_counter;
-    wire [1:0] digit_select;
+    localparam integer HALF_PERIOD =
+        (RAW_DIV < 1) ? 1 : RAW_DIV;
+
+    localparam integer COUNT_WIDTH =
+        (HALF_PERIOD <= 1) ? 1 : $clog2(HALF_PERIOD);
+
+    reg [COUNT_WIDTH-1:0] refresh_count;
+    reg scan_digit;
 
     reg [3:0] digit_value;
+    reg [7:0] display_value;
 
-    // Refresh digits fast enough to avoid visible flicker
+    // Decimal point is active-low: 1 means OFF.
+    assign dp = 1'b1;
+
+    // Multiplex the two rightmost digits.
     always @(posedge clk) begin
-        if (reset)
-            refresh_counter <= 17'd0;
-        else
-            refresh_counter <= refresh_counter + 1'b1;
+        if (reset) begin
+            refresh_count <= 0;
+            scan_digit    <= 1'b0;
+        end
+        else begin
+            if (refresh_count >= HALF_PERIOD - 1) begin
+                refresh_count <= 0;
+                scan_digit    <= ~scan_digit;
+            end
+            else begin
+                refresh_count <= refresh_count + 1'b1;
+            end
+        end
     end
 
-    assign digit_select = refresh_counter[16:15];
-
-    // Select the digit to display
+    // Convert the input value into decimal tens and units.
     always @(*) begin
-        case (digit_select)
-            2'b00: begin
-                AN = 8'b11111110;
-                digit_value = value % 10;
-            end
+        if (value > 8'd99)
+            display_value = 8'd99;
+        else
+            display_value = value;
 
-            2'b01: begin
-                AN = 8'b11111101;
-                digit_value = (value / 10) % 10;
-            end
+        if (scan_digit == 1'b0) begin
+            digit_value = display_value % 10;
+            an = 8'b11111110;  // Units digit
+        end
+        else begin
+            digit_value = display_value / 10;
+            an = 8'b11111101;  // Tens digit
+        end
 
-            2'b10: begin
-                AN = 8'b11111011;
-                digit_value = (value / 100) % 10;
-            end
-
-            2'b11: begin
-                AN = 8'b11110111;
-                digit_value = (value / 1000) % 10;
-            end
-
-            default: begin
-                AN = 8'b11111111;
-                digit_value = 4'd0;
-            end
-        endcase
-
-        // Active-low segment encoding: SEG = {g,f,e,d,c,b,a}
+        // Active-low seven-segment encoding: abcdefg
         case (digit_value)
-            4'd0: SEG = 7'b1000000;
-            4'd1: SEG = 7'b1111001;
-            4'd2: SEG = 7'b0100100;
-            4'd3: SEG = 7'b0110000;
-            4'd4: SEG = 7'b0011001;
-            4'd5: SEG = 7'b0010010;
-            4'd6: SEG = 7'b0000010;
-            4'd7: SEG = 7'b1111000;
-            4'd8: SEG = 7'b0000000;
-            4'd9: SEG = 7'b0010000;
-            default: SEG = 7'b1111111;
+            4'd0: seg = 7'b1000000;
+            4'd1: seg = 7'b1111001;
+            4'd2: seg = 7'b0100100;
+            4'd3: seg = 7'b0110000;
+            4'd4: seg = 7'b0011001;
+            4'd5: seg = 7'b0010010;
+            4'd6: seg = 7'b0000010;
+            4'd7: seg = 7'b1111000;
+            4'd8: seg = 7'b0000000;
+            4'd9: seg = 7'b0010000;
+            default: seg = 7'b1111111;
         endcase
     end
 
