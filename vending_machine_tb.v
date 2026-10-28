@@ -16,7 +16,7 @@ module vending_machine_tb;
     wire [7:0] change;
     wire busy;
 
-    // Short timing for simulation
+    // Short dispensing time for simulation
     vending_fsm #(
         .CLK_FREQ_HZ(5),
         .DISPENSE_SECONDS(1)
@@ -34,11 +34,11 @@ module vending_machine_tb;
         .busy(busy)
     );
 
-    // 100 MHz simulation clock: 10 ns period
+    // 10 ns clock period
     initial clk = 1'b0;
     always #5 clk = ~clk;
 
-    // Insert one coin for one clock cycle
+    // Insert one Rs. 5 coin
     task insert_coin5;
         begin
             @(negedge clk);
@@ -48,6 +48,7 @@ module vending_machine_tb;
         end
     endtask
 
+    // Insert one Rs. 10 coin
     task insert_coin10;
         begin
             @(negedge clk);
@@ -57,7 +58,7 @@ module vending_machine_tb;
         end
     endtask
 
-    // Start a transaction after selecting the product
+    // Begin a transaction
     task start_transaction;
         input product_b;
         begin
@@ -69,7 +70,7 @@ module vending_machine_tb;
         end
     endtask
 
-    // Reset the FSM between test cases
+    // Reset between tests
     task reset_fsm;
         begin
             @(negedge clk);
@@ -80,8 +81,53 @@ module vending_machine_tb;
             coin_10 = 1'b0;
 
             repeat (2) @(negedge clk);
+
             reset = 1'b0;
             @(negedge clk);
+        end
+    endtask
+
+    // Wait for a product and verify results
+    task check_result;
+        input expected_product_b;
+        input [7:0] expected_amount;
+        input [7:0] expected_change;
+        begin
+            // Prevent an indefinite wait if dispensing never occurs.
+            fork
+                begin
+                    if (expected_product_b)
+                        wait (dispense_b == 1'b1);
+                    else
+                        wait (dispense_a == 1'b1);
+                end
+
+                begin
+                    repeat (30) @(negedge clk);
+                    $display("FAIL: Timeout waiting for dispensing");
+                    $finish;
+                end
+            join_any
+            disable fork;
+
+            #1;
+
+            if ((expected_product_b && dispense_b && !dispense_a) ||
+                (!expected_product_b && dispense_a && !dispense_b)) begin
+
+                if (amount == expected_amount &&
+                    change == expected_change) begin
+                    $display("PASS: Product %s, amount=%0d, change=%0d",
+                        expected_product_b ? "B" : "A",
+                        amount, change);
+                end else begin
+                    $display("FAIL: Expected amount=%0d change=%0d; got amount=%0d change=%0d",
+                        expected_amount, expected_change, amount, change);
+                end
+
+            end else begin
+                $display("FAIL: Incorrect product output");
+            end
         end
     endtask
 
@@ -92,67 +138,62 @@ module vending_machine_tb;
         coin_5 = 1'b0;
         coin_10 = 1'b0;
 
-        $display("Starting vending machine tests");
+        $display("--------------------------------");
+        $display("VENDING MACHINE TESTBENCH");
+        $display("--------------------------------");
 
-        // Allow initial reset
         repeat (2) @(negedge clk);
         reset = 1'b0;
 
-        // TEST 1: Product A costs Rs. 10
-        $display("TEST 1: Product A, exact payment Rs. 10");
+        // TEST 1: Product A, exact Rs. 10
+        $display("TEST 1: Product A, exact payment");
         start_transaction(1'b0);
         insert_coin10;
-
-        wait (dispense_a == 1'b1);
-        #1;
-        if (amount == 10 && change == 0 && dispense_b == 0)
-            $display("PASS: Product A dispensed correctly");
-        else
-            $display("FAIL: A amount=%0d change=%0d", amount, change);
+        check_result(1'b0, 8'd10, 8'd0);
 
         wait (busy == 1'b0);
         reset_fsm;
 
-        // TEST 2: Product B costs Rs. 20
-        $display("TEST 2: Product B, exact payment Rs. 20");
+        // TEST 2: Product B, exact Rs. 20
+        $display("TEST 2: Product B, exact payment");
         start_transaction(1'b1);
         insert_coin10;
         insert_coin10;
-
-        wait (dispense_b == 1'b1);
-        #1;
-        if (amount == 20 && change == 0 && dispense_a == 0)
-            $display("PASS: Product B dispensed correctly");
-        else
-            $display("FAIL: B amount=%0d change=%0d", amount, change);
+        check_result(1'b1, 8'd20, 8'd0);
 
         wait (busy == 1'b0);
         reset_fsm;
 
-        // TEST 3: Product B costs Rs. 20; pay Rs. 25
-        $display("TEST 3: Product B, payment Rs. 25, change Rs. 5");
+        // TEST 3: Product A, Rs. 15 payment, Rs. 5 change
+        $display("TEST 3: Product A, overpayment");
+        start_transaction(1'b0);
+        insert_coin10;
+        insert_coin5;
+        check_result(1'b0, 8'd15, 8'd5);
+
+        wait (busy == 1'b0);
+        reset_fsm;
+
+        // TEST 4: Product B, Rs. 25 payment, Rs. 5 change
+        $display("TEST 4: Product B, overpayment");
         start_transaction(1'b1);
         insert_coin5;
         insert_coin10;
         insert_coin10;
-
-        wait (dispense_b == 1'b1);
-        #1;
-        if (amount == 25 && change == 5 && dispense_a == 0)
-            $display("PASS: Product B and Rs. 5 change");
-        else
-            $display("FAIL: B amount=%0d change=%0d", amount, change);
+        check_result(1'b1, 8'd25, 8'd5);
 
         wait (busy == 1'b0);
 
-        $display("All test cases completed");
+        $display("--------------------------------");
+        $display("TESTBENCH COMPLETED");
+        $display("--------------------------------");
         $finish;
     end
 
-    // Stop simulation if a test hangs
+    // Global simulation timeout
     initial begin
         #10000;
-        $display("ERROR: Simulation timed out");
+        $display("FAIL: Global simulation timeout");
         $finish;
     end
 
