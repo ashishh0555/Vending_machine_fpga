@@ -14,7 +14,6 @@ module vending_machine_tb;
     wire [7:0] amount;
     wire [7:0] change;
 
-    // Instantiate the vending machine controller
     vending_fsm dut (
         .clk(clk),
         .reset(reset),
@@ -27,84 +26,105 @@ module vending_machine_tb;
         .change(change)
     );
 
-    // 100 MHz clock: 10 ns period
+    // 100 MHz clock
     always #5 clk = ~clk;
 
-    // Apply a coin for exactly one clock cycle
     task insert_coin;
         input integer denomination;
         begin
             @(negedge clk);
-            if (denomination == 5) begin
-                coin_5 = 1;
-                coin_10 = 0;
-            end
-            else if (denomination == 10) begin
-                coin_5 = 0;
-                coin_10 = 1;
-            end
+            coin_5  = (denomination == 5);
+            coin_10 = (denomination == 10);
 
             @(negedge clk);
-            coin_5 = 0;
+            coin_5  = 0;
             coin_10 = 0;
+
             @(negedge clk);
         end
     endtask
 
+    task reset_machine;
+        begin
+            @(negedge clk);
+            reset = 1;
+            repeat (2) @(negedge clk);
+            reset = 0;
+            repeat (2) @(negedge clk);
+        end
+    endtask
+
+    task wait_for_dispense;
+        integer cycles;
+        begin
+            cycles = 0;
+
+            while (!dispense_a && !dispense_b && cycles < 10) begin
+                @(negedge clk);
+                cycles = cycles + 1;
+            end
+
+            if (cycles >= 10)
+                $fatal(1, "ERROR: Dispense timeout");
+
+            $display("Dispense detected: A=%b B=%b amount=%0d change=%0d",
+                     dispense_a, dispense_b, amount, change);
+        end
+    endtask
+
     initial begin
-        clk = 0;
-        reset = 1;
+        clk      = 0;
+        reset    = 1;
         select_b = 0;
-        coin_5 = 0;
-        coin_10 = 0;
+        coin_5   = 0;
+        coin_10  = 0;
 
-        // Reset the controller
         repeat (3) @(negedge clk);
         reset = 0;
 
-        // Allow the controller to enter COLLECT
+        // TEST 1: Product A costs Rs. 10
         repeat (2) @(negedge clk);
-
-        // TEST 1: Product A, price Rs. 10
-        $display("TEST 1: Product A - Rs. 5 + Rs. 5");
         select_b = 0;
+
         insert_coin(5);
         insert_coin(5);
-        repeat (3) @(negedge clk);
+        wait_for_dispense();
 
-        if (dispense_a)
-            $display("Product A dispensed");
-        else
-            $display("Observe waveform for dispense pulse");
+        if (dispense_a !== 1'b1 || change !== 0)
+            $fatal(1, "TEST 1 FAILED");
 
-        // Reset between tests
-        reset = 1;
-        @(negedge clk);
-        reset = 0;
+        $display("TEST 1 PASSED");
+        reset_machine();
+
+        // TEST 2: Product B costs Rs. 20
+        select_b = 1;
         repeat (2) @(negedge clk);
 
-        // TEST 2: Product B, price Rs. 20
-        $display("TEST 2: Product B - Rs. 10 + Rs. 10");
-        select_b = 1;
         insert_coin(10);
         insert_coin(10);
-        repeat (3) @(negedge clk);
+        wait_for_dispense();
 
-        // Reset between tests
-        reset = 1;
-        @(negedge clk);
-        reset = 0;
+        if (dispense_b !== 1'b1 || change !== 0)
+            $fatal(1, "TEST 2 FAILED");
+
+        $display("TEST 2 PASSED");
+        reset_machine();
+
+        // TEST 3: Rs. 25 paid for Product B
+        select_b = 1;
         repeat (2) @(negedge clk);
 
-        // TEST 3: Product B, Rs. 10 + Rs. 10 + Rs. 5
-        $display("TEST 3: Product B - Rs. 25, expected Rs. 5 change");
-        select_b = 1;
         insert_coin(10);
         insert_coin(10);
         insert_coin(5);
-        repeat (3) @(negedge clk);
+        wait_for_dispense();
 
-        $display("Simulation completed.");
+        if (dispense_b !== 1'b1 || change !== 5)
+            $fatal(1, "TEST 3 FAILED");
+
+        $display("TEST 3 PASSED");
+        $display("ALL TESTS PASSED");
+
         $finish;
     end
 
