@@ -114,25 +114,26 @@ module vending_fsm #(
                     state   <= SHOW_CHANGE;
                 end
 
+                
                 SHOW_CHANGE: begin
                     busy       <= 1'b1;
                     dispense_a <= !selected_b;
                     dispense_b <= selected_b;
 
-                    
-if (counter >= DISPENSE_CYCLES - 1) begin
-    dispense_a <= 1'b0;
-    dispense_b <= 1'b0;
-    busy       <= 1'b0;
-    amount     <= 8'd0;
-    change     <= 8'd0;
-    counter    <= {COUNT_WIDTH{1'b0}};
-    state      <= IDLE;
-end
-else begin
+                    if (counter >= DISPENSE_CYCLES - 1) begin
+                        dispense_a <= 1'b0;
+                        dispense_b <= 1'b0;
+                        busy       <= 1'b0;
+                        amount     <= 8'd0;
+                        change     <= 8'd0;
+                        counter    <= {COUNT_WIDTH{1'b0}};
+                        state      <= IDLE;
+                    end
+                    else begin
                         counter <= counter + 1'b1;
                     end
                 end
+
 
                 default: begin
                     state      <= IDLE;
