@@ -1,63 +1,64 @@
 
-`timescale 1ns / 1ps
-
 module vending_machine_top (
     input  wire       CLK100MHZ,
     input  wire       CPU_RESETN,
     input  wire [0:0] SW,
-
-    input  wire       BTNC,  // Start transaction
-    input  wire       BTNU,  // Insert Rs. 5
-    input  wire       BTNR,  // Insert Rs. 10
+    input  wire       BTNC,
+    input  wire       BTNU,
+    input  wire       BTNR,
 
     output wire [7:0] LED,
-    output wire [6:0] SEG,
+    output reg  [6:0] SEG,
     output wire       DP,
-    output wire [7:0] AN
+    output reg  [7:0] AN
 );
 
-    wire reset;
+    wire reset = ~CPU_RESETN;
 
-    wire start_pulse;
-    wire coin5_pulse;
-    wire coin10_pulse;
+    // Synchronize the physical push buttons.
+    reg start_sync1, start_sync2, start_prev;
+    reg coin5_sync1, coin5_sync2, coin5_prev;
+    reg coin10_sync1, coin10_sync2, coin10_prev;
+
+    always @(posedge CLK100MHZ) begin
+        if (reset) begin
+            start_sync1 <= 1'b0;
+            start_sync2 <= 1'b0;
+            start_prev  <= 1'b0;
+
+            coin5_sync1 <= 1'b0;
+            coin5_sync2 <= 1'b0;
+            coin5_prev  <= 1'b0;
+
+            coin10_sync1 <= 1'b0;
+            coin10_sync2 <= 1'b0;
+            coin10_prev  <= 1'b0;
+        end
+        else begin
+            start_sync1 <= BTNC;
+            start_sync2 <= start_sync1;
+            start_prev  <= start_sync2;
+
+            coin5_sync1 <= BTNU;
+            coin5_sync2 <= coin5_sync1;
+            coin5_prev  <= coin5_sync2;
+
+            coin10_sync1 <= BTNR;
+            coin10_sync2 <= coin10_sync1;
+            coin10_prev  <= coin10_sync2;
+        end
+    end
+
+    wire start_pulse = start_sync2 & ~start_prev;
+    wire coin5_pulse = coin5_sync2 & ~coin5_prev;
+    wire coin10_pulse = coin10_sync2 & ~coin10_prev;
 
     wire dispense_a;
     wire dispense_b;
-    wire busy;
-
     wire [7:0] amount;
     wire [7:0] change;
-    wire [7:0] display_value;
+    wire busy;
 
-    // Nexys 4 DDR reset is active-low.
-    assign reset = ~CPU_RESETN;
-
-    // Center button: start transaction.
-    button_pulse start_button (
-        .clk(CLK100MHZ),
-        .reset(reset),
-        .button_in(BTNC),
-        .pulse_out(start_pulse)
-    );
-
-    // Up button: insert Rs. 5.
-    button_pulse coin5_button (
-        .clk(CLK100MHZ),
-        .reset(reset),
-        .button_in(BTNU),
-        .pulse_out(coin5_pulse)
-    );
-
-    // Right button: insert Rs. 10.
-    button_pulse coin10_button (
-        .clk(CLK100MHZ),
-        .reset(reset),
-        .button_in(BTNR),
-        .pulse_out(coin10_pulse)
-    );
-
-    // Main vending machine controller.
     vending_fsm #(
         .CLK_FREQ_HZ(100_000_000),
         .DISPENSE_SECONDS(1)
@@ -75,29 +76,65 @@ module vending_machine_top (
         .busy(busy)
     );
 
-    // LEDs:
-    // LED[0] = Product A dispensing
-    // LED[1] = Product B dispensing
-    // LED[2] = Transaction busy
-    // LED[7:3] = Low five bits of inserted amount
+    // Show the amount first, then show the change during dispensing.
+    wire [7:0] display_value =
+        (dispense_a || dispense_b) ? change : amount;
+
     assign LED[0]   = dispense_a;
     assign LED[1]   = dispense_b;
     assign LED[2]   = busy;
     assign LED[7:3] = amount[4:0];
 
-    // Show change while dispensing.
-    // Otherwise show the amount inserted.
-    assign display_value =
-        (dispense_a || dispense_b) ? change : amount;
+    assign DP = 1'b1;
 
-    // Seven-segment display driver.
-    seven_segment display_driver (
-        .clk(CLK100MHZ),
-        .reset(reset),
-        .value(display_value),
-        .seg(SEG),
-        .an(AN),
-        .dp(DP)
-    );
+    // Multiplex the two rightmost seven-segment digits.
+    reg [15:0] scan_count;
+    reg [3:0] digit;
+    reg [7:0] display_value_latched;
+
+    always @(posedge CLK100MHZ) begin
+        if (reset)
+            scan_count <= 16'd0;
+        else
+            scan_count <= scan_count + 1'b1;
+    end
+
+    always @(*) begin
+        display_value_latched = display_value;
+        digit = 4'd0;
+        AN = 8'b11111111;
+
+        case (scan_count[15:14])
+            2'b00: begin
+                AN = 8'b11111110;
+                digit = display_value_latched % 10;
+            end
+
+            2'b01: begin
+                AN = 8'b11111101;
+                digit = display_value_latched / 10;
+            end
+
+            default: begin
+                AN = 8'b11111111;
+                digit = 4'd0;
+            end
+        endcase
+
+        // Active-low segment patterns: a, b, c, d, e, f, g.
+        case (digit)
+            4'd0: SEG = 7'b1000000;
+            4'd1: SEG = 7'b1111001;
+            4'd2: SEG = 7'b0100100;
+            4'd3: SEG = 7'b0110000;
+            4'd4: SEG = 7'b0011001;
+            4'd5: SEG = 7'b0010010;
+            4'd6: SEG = 7'b0000010;
+            4'd7: SEG = 7'b1111000;
+            4'd8: SEG = 7'b0000000;
+            4'd9: SEG = 7'b0010000;
+            default: SEG = 7'b1111111;
+        endcase
+    end
 
 endmodule
