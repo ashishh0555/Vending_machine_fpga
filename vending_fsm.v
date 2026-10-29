@@ -19,11 +19,14 @@ module vending_fsm #(
     output reg        busy
 );
 
+    // FSM states
     localparam [1:0]
-        IDLE     = 2'b00,
-        COLLECT  = 2'b01,
-        DISPENSE = 2'b10;
+        IDLE        = 2'b00,
+        COLLECT     = 2'b01,
+        SHOW_AMOUNT = 2'b10,
+        DISPENSE    = 2'b11;
 
+    // Duration of amount and dispensing displays
     localparam integer DISPENSE_CYCLES =
         (CLK_FREQ_HZ > 0 && DISPENSE_SECONDS > 0)
         ? CLK_FREQ_HZ * DISPENSE_SECONDS : 1;
@@ -34,16 +37,17 @@ module vending_fsm #(
 
     reg [1:0] state;
     reg [7:0] price;
-    reg selected_b;
+    reg       selected_b;
     reg [COUNT_WIDTH-1:0] counter;
 
+    // Coin value and updated total
     wire [8:0] coin_value;
     wire [8:0] next_amount;
 
     assign coin_value =
-        (coin_5 && !coin_10)  ? 9'd5  :
-        (coin_10 && !coin_5)  ? 9'd10 :
-                                9'd0;
+        (coin_5 && !coin_10) ? 9'd5 :
+        (coin_10 && !coin_5) ? 9'd10 :
+                               9'd0;
 
     assign next_amount = {1'b0, amount} + coin_value;
 
@@ -58,9 +62,9 @@ module vending_fsm #(
             dispense_b <= 1'b0;
             busy       <= 1'b0;
             counter    <= {COUNT_WIDTH{1'b0}};
-        end else begin
-
-            // Default: dispense indicators are off unless dispensing.
+        end
+        else begin
+            // Default: products are not dispensing
             dispense_a <= 1'b0;
             dispense_b <= 1'b0;
 
@@ -83,16 +87,17 @@ module vending_fsm #(
                 COLLECT: begin
                     busy <= 1'b1;
 
-                    // Accept one coin at a time.
+                    // Accept one coin denomination at a time
                     if (coin_5 ^ coin_10) begin
 
-                        // Save the new total, including this coin.
+                        // Update the accumulated payment
                         if (next_amount > 9'd255)
                             amount <= 8'd255;
                         else
                             amount <= next_amount[7:0];
 
-                        // Compare the updated total against the price.
+                        // Once enough money is inserted,
+                        // calculate change and show the total first
                         if (next_amount >= {1'b0, price}) begin
                             if (next_amount > 9'd255)
                                 change <= 8'd255 - price;
@@ -100,12 +105,28 @@ module vending_fsm #(
                                 change <= next_amount[7:0] - price;
 
                             counter <= {COUNT_WIDTH{1'b0}};
-                            state   <= DISPENSE;
+                            state   <= SHOW_AMOUNT;
                         end
                     end
                 end
 
+                SHOW_AMOUNT: begin
+                    // Keep the final inserted amount on display
+                    busy       <= 1'b1;
+                    dispense_a <= 1'b0;
+                    dispense_b <= 1'b0;
+
+                    if (counter >= DISPENSE_CYCLES - 1) begin
+                        counter <= {COUNT_WIDTH{1'b0}};
+                        state   <= DISPENSE;
+                    end
+                    else begin
+                        counter <= counter + 1'b1;
+                    end
+                end
+
                 DISPENSE: begin
+                    // Display change while the product is dispensing
                     busy       <= 1'b1;
                     dispense_a <= !selected_b;
                     dispense_b <= selected_b;
@@ -118,7 +139,8 @@ module vending_fsm #(
                         change     <= 8'd0;
                         counter    <= {COUNT_WIDTH{1'b0}};
                         state      <= IDLE;
-                    end else begin
+                    end
+                    else begin
                         counter <= counter + 1'b1;
                     end
                 end
