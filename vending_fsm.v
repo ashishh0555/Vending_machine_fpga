@@ -19,14 +19,11 @@ module vending_fsm #(
     output reg        busy
 );
 
-    // FSM states
     localparam [1:0]
-        IDLE        = 2'b00,
-        COLLECT     = 2'b01,
-        DISPENSE    = 2'b10,
-        SHOW_CHANGE = 2'b11;
+        IDLE     = 2'b00,
+        COLLECT  = 2'b01,
+        DISPENSE = 2'b10;
 
-    // Number of clock cycles for the dispense indication
     localparam integer DISPENSE_CYCLES =
         (CLK_FREQ_HZ > 0 && DISPENSE_SECONDS > 0)
         ? CLK_FREQ_HZ * DISPENSE_SECONDS : 1;
@@ -37,16 +34,18 @@ module vending_fsm #(
 
     reg [1:0] state;
     reg [7:0] price;
-    reg       selected_b;
+    reg selected_b;
     reg [COUNT_WIDTH-1:0] counter;
 
-    // Combinational next payment amount
+    wire [8:0] coin_value;
     wire [8:0] next_amount;
 
-    assign next_amount =
-        {1'b0, amount}
-        + (coin_5 && !coin_10 ? 9'd5 :
-           coin_10 && !coin_5 ? 9'd10 : 9'd0);
+    assign coin_value =
+        (coin_5 && !coin_10)  ? 9'd5  :
+        (coin_10 && !coin_5)  ? 9'd10 :
+                                9'd0;
+
+    assign next_amount = {1'b0, amount} + coin_value;
 
     always @(posedge clk) begin
         if (reset) begin
@@ -61,7 +60,7 @@ module vending_fsm #(
             counter    <= {COUNT_WIDTH{1'b0}};
         end else begin
 
-            // Default outputs
+            // Default: dispense indicators are off unless dispensing.
             dispense_a <= 1'b0;
             dispense_b <= 1'b0;
 
@@ -72,50 +71,41 @@ module vending_fsm #(
 
                     if (start) begin
                         selected_b <= select_b;
-                        price      <= select_b ? 8'd20 : 8'd10;
-                        amount     <= 8'd0;
-                        change     <= 8'd0;
-                        counter    <= {COUNT_WIDTH{1'b0}};
-                        busy       <= 1'b1;
-                        state      <= COLLECT;
+                        price       <= select_b ? 8'd20 : 8'd10;
+                        amount      <= 8'd0;
+                        change      <= 8'd0;
+                        counter     <= {COUNT_WIDTH{1'b0}};
+                        busy        <= 1'b1;
+                        state       <= COLLECT;
                     end
                 end
 
                 COLLECT: begin
                     busy <= 1'b1;
 
-                    // Accept only one coin denomination per clock.
-                    if ((coin_5 ^ coin_10) == 1'b1) begin
-                        if (next_amount > 9'd255) begin
-                            // Prevent 8-bit amount overflow.
-                            amount <= 8'd255;
-                        end else begin
-                            amount <= next_amount[7:0];
-                        end
+                    // Accept one coin at a time.
+                    if (coin_5 ^ coin_10) begin
 
+                        // Save the new total, including this coin.
+                        if (next_amount > 9'd255)
+                            amount <= 8'd255;
+                        else
+                            amount <= next_amount[7:0];
+
+                        // Compare the updated total against the price.
                         if (next_amount >= {1'b0, price}) begin
-                            state <= DISPENSE;
+                            if (next_amount > 9'd255)
+                                change <= 8'd255 - price;
+                            else
+                                change <= next_amount[7:0] - price;
+
+                            counter <= {COUNT_WIDTH{1'b0}};
+                            state   <= DISPENSE;
                         end
                     end
                 end
 
                 DISPENSE: begin
-                    // Assert the selected product indicator.
-                    dispense_a <= !selected_b;
-                    dispense_b <= selected_b;
-
-                    // Calculate change from the accepted payment.
-                    if (amount >= price)
-                        change <= amount - price;
-                    else
-                        change <= 8'd0;
-
-                    counter <= {COUNT_WIDTH{1'b0}};
-                    state   <= SHOW_CHANGE;
-                end
-
-                
-                SHOW_CHANGE: begin
                     busy       <= 1'b1;
                     dispense_a <= !selected_b;
                     dispense_b <= selected_b;
@@ -128,12 +118,10 @@ module vending_fsm #(
                         change     <= 8'd0;
                         counter    <= {COUNT_WIDTH{1'b0}};
                         state      <= IDLE;
-                    end
-                    else begin
+                    end else begin
                         counter <= counter + 1'b1;
                     end
                 end
-
 
                 default: begin
                     state      <= IDLE;
